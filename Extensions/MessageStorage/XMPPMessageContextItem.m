@@ -1,9 +1,39 @@
 #import "XMPPMessageContextItem.h"
-#import "XMPPJID.h"
+#import "XMPPMessageContextNode.h"
+#import "XMPPMessageBaseNode+Protected.h"
+#import "NSManagedObject+XMPPCoreDataStorage.h"
 
 @implementation XMPPMessageContextItem
 
 @dynamic contextNode, messageNode;
+
++ (NSPredicate *)streamEventIDPredicateWithValue:(NSString *)value
+{
+    return [NSPredicate predicateWithFormat:@"%K.%K = %@",
+            NSStringFromSelector(@selector(contextNode)), NSStringFromSelector(@selector(streamEventID)),
+            value];
+}
+
++ (NSPredicate *)messageJIDPredicateWithDomainKeyPath:(NSString *)domainKeyPath resourceKeyPath:(NSString *)resourceKeyPath userKeyPath:(NSString *)userKeyPath value:(XMPPJID *)value compareOptions:(XMPPJIDCompareOptions)compareOptions
+{
+    return [self xmpp_jidPredicateWithDomainKeyPath:[NSString stringWithFormat:@"%@.%@", NSStringFromSelector(@selector(messageNode)), domainKeyPath]
+                                    resourceKeyPath:[NSString stringWithFormat:@"%@.%@", NSStringFromSelector(@selector(messageNode)), resourceKeyPath]
+                                        userKeyPath:[NSString stringWithFormat:@"%@.%@", NSStringFromSelector(@selector(messageNode)), userKeyPath]
+                                              value:value
+                                     compareOptions:compareOptions];
+}
+
++ (NSPredicate *)messageDirectionPredicateWithValue:(XMPPMessageDirection)value
+{
+    return [NSPredicate predicateWithFormat:@"%K.%K = %d",
+            NSStringFromSelector(@selector(messageNode)), NSStringFromSelector(@selector(direction)),
+            value];
+}
+
++ (NSPredicate *)tagPredicateWithValue:(NSString *)value
+{
+    return [NSPredicate predicateWithFormat:@"%K = %@", NSStringFromSelector(@selector(tag)), value];
+}
 
 @end
 
@@ -109,11 +139,32 @@
     [self didChangeValueForKey:NSStringFromSelector(@selector(valueUser))];
 }
 
+#pragma mark - Public
+
++ (NSPredicate *)tagPredicateWithValue:(XMPPMessageContextJIDItemTag)value
+{
+    return [super tagPredicateWithValue:value];
+}
+
++ (NSPredicate *)jidPredicateWithValue:(XMPPJID *)value compareOptions:(XMPPJIDCompareOptions)compareOptions
+{
+    return [self xmpp_jidPredicateWithDomainKeyPath:NSStringFromSelector(@selector(valueDomain))
+                                    resourceKeyPath:NSStringFromSelector(@selector(valueResource))
+                                        userKeyPath:NSStringFromSelector(@selector(valueUser))
+                                              value:value
+                                     compareOptions:compareOptions];
+}
+
 @end
 
 @implementation XMPPMessageContextMarkerItem
 
 @dynamic tag;
+
++ (NSPredicate *)tagPredicateWithValue:(XMPPMessageContextMarkerItemTag)value
+{
+    return [super tagPredicateWithValue:value];
+}
 
 @end
 
@@ -121,10 +172,42 @@
 
 @dynamic tag, value;
 
++ (NSPredicate *)tagPredicateWithValue:(XMPPMessageContextStringItemTag)value
+{
+    return [super tagPredicateWithValue:value];
+}
+
 @end
 
 @implementation XMPPMessageContextTimestampItem
 
 @dynamic tag, value;
+
++ (NSPredicate *)tagPredicateWithValue:(XMPPMessageContextTimestampItemTag)value
+{
+    return [super tagPredicateWithValue:value];
+}
+
++ (NSPredicate *)timestampDisplacementPredicateWithTag:(XMPPMessageContextTimestampItemTag)displacingTag
+{
+    return [NSPredicate predicateWithFormat:@"NONE %K.%K.%K = %@",
+            NSStringFromSelector(@selector(messageNode)), NSStringFromSelector(@selector(allTimestampItems)), NSStringFromSelector(@selector(tag)),
+            displacingTag];
+}
+
++ (NSPredicate *)timestampRangePredicateWithStartValue:(NSDate *)startValue endValue:(NSDate *)endValue
+{
+    NSMutableArray *subpredicates = [[NSMutableArray alloc] init];
+    
+    if (startValue) {
+        [subpredicates addObject:[NSPredicate predicateWithFormat:@"%K >= %@", NSStringFromSelector(@selector(value)), startValue]];
+    }
+    
+    if (endValue) {
+        [subpredicates addObject:[NSPredicate predicateWithFormat:@"%K <= %@", NSStringFromSelector(@selector(value)), endValue]];
+    }
+    
+    return subpredicates.count == 1 ? subpredicates.firstObject : [NSCompoundPredicate andPredicateWithSubpredicates:subpredicates];
+}
 
 @end
