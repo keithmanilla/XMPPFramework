@@ -14,6 +14,23 @@
     return insertedNode;
 }
 
+- (id)lookupInContextWithBlock:(id (^)(XMPPMessageContextNode * _Nonnull))lookupBlock
+{
+    id lookupResult;
+    for (XMPPMessageContextNode *contextNode in self.contextNodes) {
+        id nodeResult = lookupBlock(contextNode);
+        if (!nodeResult) {
+            continue;
+        }
+        NSAssert(!lookupResult, @"A unique lookup result is expected");
+        lookupResult = nodeResult;
+#ifdef NS_BLOCK_ASSERTIONS
+        break;
+#endif
+    }
+    return lookupResult;
+}
+
 @end
 
 @implementation XMPPMessageContextNode (ContextHelpers)
@@ -63,6 +80,106 @@
     insertedItem.contextNode = self;
     insertedItem.messageNode = self.messageNode;
     return insertedItem;
+}
+
+- (NSSet<XMPPJID *> *)jidItemValuesForTag:(XMPPMessageContextJIDItemTag)tag
+{
+    return [[self jidItemsForTag:tag expectingSingleElement:NO] valueForKey:NSStringFromSelector(@selector(value))];
+}
+
+- (XMPPJID *)jidItemValueForTag:(XMPPMessageContextJIDItemTag)tag
+{
+    return [[self jidItemsForTag:tag expectingSingleElement:YES] anyObject].value;
+}
+
+- (NSInteger)markerItemCountForTag:(XMPPMessageContextMarkerItemTag)tag
+{
+    return [self markerItemsForTag:tag expectingSingleElement:NO].count;
+}
+
+- (BOOL)hasMarkerItemForTag:(XMPPMessageContextMarkerItemTag)tag
+{
+    return [[self markerItemsForTag:tag expectingSingleElement:YES] anyObject] != nil;
+}
+
+- (NSSet<NSString *> *)stringItemValuesForTag:(XMPPMessageContextStringItemTag)tag
+{
+    return [[self stringItemsForTag:tag expectingSingleElement:NO] valueForKey:NSStringFromSelector(@selector(value))];
+}
+
+- (NSString *)stringItemValueForTag:(XMPPMessageContextStringItemTag)tag
+{
+    return [[self stringItemsForTag:tag expectingSingleElement:YES] anyObject].value;
+}
+
+- (NSSet<NSDate *> *)timestampItemValuesForTag:(XMPPMessageContextTimestampItemTag)tag
+{
+    return [[self timestampItemsForTag:tag expectingSingleElement:NO] valueForKey:NSStringFromSelector(@selector(value))];
+}
+
+- (NSDate *)timestampItemValueForTag:(XMPPMessageContextTimestampItemTag)tag
+{
+    return [[self timestampItemsForTag:tag expectingSingleElement:YES] anyObject].value;
+}
+
+- (NSSet<XMPPMessageContextJIDItem *> *)jidItemsForTag:(XMPPMessageContextJIDItemTag)tag expectingSingleElement:(BOOL)isSingleElementExpected
+{
+    NSSet *filteredSet = [self.jidItems objectsPassingTest:^BOOL(XMPPMessageContextJIDItem * _Nonnull obj, BOOL * _Nonnull stop) {
+        BOOL matchesTag = [obj.tag isEqualToString:tag];
+#ifdef NS_BLOCK_ASSERTIONS
+        if (matchesTag && isSingleElementExpected) {
+            *stop = YES;
+        }
+#endif
+        return matchesTag;
+    }];
+    NSAssert(!(isSingleElementExpected && filteredSet.count > 1) , @"Only one item expected");
+    return filteredSet;
+}
+
+- (NSSet<XMPPMessageContextMarkerItem *> *)markerItemsForTag:(XMPPMessageContextMarkerItemTag)tag expectingSingleElement:(BOOL)isSingleElementExpected
+{
+    NSSet *filteredSet = [self.markerItems objectsPassingTest:^BOOL(XMPPMessageContextMarkerItem * _Nonnull obj, BOOL * _Nonnull stop) {
+        BOOL matchesTag = [obj.tag isEqualToString:tag];
+#ifdef NS_BLOCK_ASSERTIONS
+        if (matchesTag && isSingleElementExpected) {
+            *stop = YES;
+        }
+#endif
+        return matchesTag;
+    }];
+    NSAssert(!(isSingleElementExpected && filteredSet.count > 1) , @"Only one item expected");
+    return filteredSet;
+}
+
+- (NSSet<XMPPMessageContextStringItem *> *)stringItemsForTag:(XMPPMessageContextStringItemTag)tag expectingSingleElement:(BOOL)isSingleElementExpected
+{
+    NSSet *filteredSet = [self.stringItems objectsPassingTest:^BOOL(XMPPMessageContextStringItem * _Nonnull obj, BOOL * _Nonnull stop) {
+        BOOL matchesTag = [obj.tag isEqualToString:tag];
+#ifdef NS_BLOCK_ASSERTIONS
+        if (matchesTag && isSingleElementExpected) {
+            *stop = YES;
+        }
+#endif
+        return matchesTag;
+    }];
+    NSAssert(!(isSingleElementExpected && filteredSet.count > 1) , @"Only one item expected");
+    return filteredSet;
+}
+
+- (NSSet<XMPPMessageContextTimestampItem *> *)timestampItemsForTag:(XMPPMessageContextTimestampItemTag)tag expectingSingleElement:(BOOL)isSingleElementExpected
+{
+    NSSet *filteredSet = [self.timestampItems objectsPassingTest:^BOOL(XMPPMessageContextTimestampItem * _Nonnull obj, BOOL * _Nonnull stop) {
+        BOOL matchesTag = [obj.tag isEqualToString:tag];
+#ifdef NS_BLOCK_ASSERTIONS
+        if (matchesTag && isSingleElementExpected) {
+            *stop = YES;
+        }
+#endif
+        return matchesTag;
+    }];
+    NSAssert(!(isSingleElementExpected && filteredSet.count > 1) , @"Only one item expected");
+    return filteredSet;
 }
 
 @end
