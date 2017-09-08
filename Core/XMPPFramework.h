@@ -166,6 +166,7 @@
 #import "XMPPMessageBaseNode+ContextObsoletion.h"
 #import "XMPPMessageContextNode.h"
 #import "XMPPMessageContextItem.h"
+#import "XMPPMessageContextItem+XMPPMessageContextFetchRequestResult.h"
 
 FOUNDATION_EXPORT double XMPPFrameworkVersionNumber;
 FOUNDATION_EXPORT const unsigned char XMPPFrameworkVersionString[];

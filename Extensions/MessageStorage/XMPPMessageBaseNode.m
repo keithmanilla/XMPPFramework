@@ -1,8 +1,14 @@
 #import "XMPPMessageBaseNode.h"
 #import "XMPPMessageBaseNode+Protected.h"
+#import "XMPPMessageBaseNode+ContextHelpers.h"
+#import "XMPPMessageBaseNode+ContextObsoletion.h"
 #import "XMPPJID.h"
 #import "XMPPMessage.h"
 #import "NSManagedObject+XMPPCoreDataStorage.h"
+
+static XMPPMessageContextJIDItemTag const XMPPMessageContextStreamJIDTag = @"XMPPMessageContextStreamJID";
+static XMPPMessageContextMarkerItemTag const XMPPMessageContextLocalOriginTag = @"XMPPMessageContextLocalOrigin";
+static XMPPMessageContextTimestampItemTag const XMPPMessageContextStreamTimestampTag = @"XMPPMessageContextStreamTimestamp";
 
 @interface XMPPMessageBaseNode ()
 
@@ -203,52 +209,124 @@
 
 #pragma mark - Public
 
-+ (XMPPMessageBaseNode *)findOrCreateForIncomingMessage:(XMPPMessage *)message withStreamJID:(XMPPJID *)streamJID streamEventID:(NSString *)streamEventID inManagedObjectContext:(NSManagedObjectContext *)managedObjectContext
++ (XMPPMessageBaseNode *)findOrCreateForIncomingMessage:(XMPPMessage *)message withStreamEventID:(NSString *)streamEventID streamJID:(XMPPJID *)streamJID timestamp:(NSDate *)timestamp inManagedObjectContext:(NSManagedObjectContext *)managedObjectContext
 {
-    XMPPMessageStreamEventNode *existingStreamEventNode = [XMPPMessageStreamEventNode findWithID:streamEventID inManagedObjectContext:managedObjectContext];
-    if (existingStreamEventNode) {
-        return existingStreamEventNode.parentMessageNode;
+    NSFetchRequest *fetchRequest = [XMPPMessageContextJIDItem xmpp_fetchRequestInManagedObjectContext:managedObjectContext];
+    fetchRequest.predicate = [NSCompoundPredicate
+                              andPredicateWithSubpredicates:@[[XMPPMessageContextJIDItem streamEventIDPredicateWithValue:streamEventID],
+                                                              [XMPPMessageContextJIDItem tagPredicateWithValue:XMPPMessageContextStreamJIDTag],
+                                                              [XMPPMessageContextJIDItem jidPredicateWithValue:streamJID compareOptions:XMPPJIDCompareFull]]];
+    
+    NSArray *fetchResult = [managedObjectContext xmpp_executeForcedSuccessFetchRequest:fetchRequest];
+    NSAssert(fetchResult.count <= 1, @"Expected a single context node for any given stream event ID/stream JID");
+    
+    XMPPMessageContextJIDItem *existingStreamJIDItem = fetchResult.firstObject;
+    if (existingStreamJIDItem) {
+        NSAssert(existingStreamJIDItem.messageNode.direction == XMPPMessageDirectionIncoming, @"Expected an incoming message node");
+        NSAssert([[existingStreamJIDItem.messageNode timestamp] isEqualToDate:timestamp], @"Timestamp does not match the existing message");
+        return existingStreamJIDItem.messageNode;
     }
     
-    XMPPMessageStreamEventNode *newStreamEventNode = [XMPPMessageStreamEventNode xmpp_insertNewObjectInManagedObjectContext:managedObjectContext];
-    newStreamEventNode.eventID = streamEventID;
-    newStreamEventNode.kind = XMPPMessageStreamEventKindIncoming;
-    newStreamEventNode.streamJID = streamJID;
-    
-    XMPPMessageBaseNode *messageNode = [XMPPMessageBaseNode xmpp_insertNewObjectInManagedObjectContext:managedObjectContext];
-    messageNode.fromJID = [message from];
-    messageNode.toJID = [message to];
-    messageNode.body = [message body];
-    messageNode.stanzaID = [message elementID];
-    messageNode.subject = [message subject];
-    messageNode.thread = [message thread];
+    XMPPMessageBaseNode *insertedMessageNode = [XMPPMessageBaseNode xmpp_insertNewObjectInManagedObjectContext:managedObjectContext];
+    insertedMessageNode.fromJID = [message from];
+    insertedMessageNode.toJID = [message to];
+    insertedMessageNode.body = [message body];
+    insertedMessageNode.stanzaID = [message elementID];
+    insertedMessageNode.subject = [message subject];
+    insertedMessageNode.thread = [message thread];
+    insertedMessageNode.direction = XMPPMessageDirectionIncoming;
     
     if ([[message type] isEqualToString:@"chat"]) {
-        messageNode.type = XMPPMessageTypeChat;
+        insertedMessageNode.type = XMPPMessageTypeChat;
     } else if ([[message type] isEqualToString:@"error"]) {
-        messageNode.type = XMPPMessageTypeError;
+        insertedMessageNode.type = XMPPMessageTypeError;
     } else if ([[message type] isEqualToString:@"groupchat"]) {
-        messageNode.type = XMPPMessageTypeGroupchat;
+        insertedMessageNode.type = XMPPMessageTypeGroupchat;
     } else if ([[message type] isEqualToString:@"headline"]) {
-        messageNode.type = XMPPMessageTypeHeadline;
+        insertedMessageNode.type = XMPPMessageTypeHeadline;
     } else {
-        messageNode.type = XMPPMessageTypeNormal;
+        insertedMessageNode.type = XMPPMessageTypeNormal;
     }
     
-    [messageNode addChildContextNodesObject:newStreamEventNode];
+    XMPPMessageContextNode *insertedStreamContextNode = [insertedMessageNode appendContextNodeWithStreamEventID:streamEventID];
+    [insertedStreamContextNode appendJIDItemWithTag:XMPPMessageContextStreamJIDTag value:streamJID];
+    [insertedStreamContextNode appendTimestampItemWithTag:XMPPMessageContextStreamTimestampTag value:timestamp];
     
-    return messageNode;
+    return insertedMessageNode;
 }
 
-+ (XMPPMessageBaseNode *)insertForOutgoingMessageToRecipientWithJID:(XMPPJID *)toJID inManagedObjectContext:(NSManagedObjectContext *)managedObjectContext
++ (instancetype)insertForOutgoingMessageInManagedObjectContext:(NSManagedObjectContext *)managedObjectContext
 {
-    XMPPMessageBaseNode *messageNode = [XMPPMessageBaseNode xmpp_insertNewObjectInManagedObjectContext:managedObjectContext];
-    messageNode.stanzaID = [NSUUID UUID].UUIDString;
-    messageNode.toJID = toJID;
+    XMPPMessageBaseNode *messageNode = [self xmpp_insertNewObjectInManagedObjectContext:managedObjectContext];
+    messageNode.direction = XMPPMessageDirectionOutgoing;
     return messageNode;
 }
 
-- (XMPPMessage *)outgoingMessage
++ (XMPPMessageBaseNode *)findForLocalOriginMessageWithStreamEventID:(NSString *)streamEventID inManagedObjectContext:(NSManagedObjectContext *)managedObjectContext
+{
+    NSFetchRequest *fetchRequest = [XMPPMessageContextMarkerItem xmpp_fetchRequestInManagedObjectContext:managedObjectContext];
+    fetchRequest.predicate = [NSCompoundPredicate
+                              andPredicateWithSubpredicates:@[[XMPPMessageContextMarkerItem streamEventIDPredicateWithValue:streamEventID],
+                                                              [XMPPMessageContextMarkerItem tagPredicateWithValue:XMPPMessageContextLocalOriginTag]]];
+    
+    NSArray *fetchResult = [managedObjectContext xmpp_executeForcedSuccessFetchRequest:fetchRequest];
+    NSAssert(fetchResult.count <= 1, @"Expected a single local origin context node for any given stream event ID");
+    
+    XMPPMessageContextMarkerItem *localInsertionItem = fetchResult.firstObject;
+    return localInsertionItem.messageNode;
+}
+
++ (NSFetchedResultsController<XMPPMessageContextFetchRequestResult> *)fetchTimestampContextWithPredicate:(NSPredicate *)predicate inAscendingOrder:(BOOL)isInAscendingOrder fromManagedObjectContext:(NSManagedObjectContext *)managedObjectContext
+{
+    NSFetchRequest *fetchRequest = [XMPPMessageContextTimestampItem xmpp_fetchRequestInManagedObjectContext:managedObjectContext];
+    fetchRequest.predicate = predicate;
+    fetchRequest.sortDescriptors = @[[NSSortDescriptor sortDescriptorWithKey:NSStringFromSelector(@selector(value)) ascending:isInAscendingOrder]];
+    
+    return [[NSFetchedResultsController<XMPPMessageContextFetchRequestResult> alloc] initWithFetchRequest:fetchRequest
+                                                                                     managedObjectContext:managedObjectContext
+                                                                                       sectionNameKeyPath:nil cacheName:nil];
+}
+
++ (NSPredicate *)streamTimestampContextPredicate
+{
+    return [NSCompoundPredicate andPredicateWithSubpredicates:@[[XMPPMessageContextTimestampItem tagPredicateWithValue:XMPPMessageContextStreamTimestampTag],
+                                                                [XMPPMessageContextTimestampItem currentNodePredicate]]];
+}
+
++ (NSPredicate *)relevantMessageFromJIDPredicateWithValue:(XMPPJID *)value compareOptions:(XMPPJIDCompareOptions)compareOptions
+{
+    return [XMPPMessageContextItem messageJIDPredicateWithDomainKeyPath:NSStringFromSelector(@selector(fromDomain))
+                                                        resourceKeyPath:NSStringFromSelector(@selector(fromResource))
+                                                            userKeyPath:NSStringFromSelector(@selector(fromUser))
+                                                                  value:value compareOptions:compareOptions];
+}
+
++ (NSPredicate *)relevantMessageToJIDPredicateWithValue:(XMPPJID *)value compareOptions:(XMPPJIDCompareOptions)compareOptions
+{
+    return [XMPPMessageContextItem messageJIDPredicateWithDomainKeyPath:NSStringFromSelector(@selector(toDomain))
+                                                        resourceKeyPath:NSStringFromSelector(@selector(toResource))
+                                                            userKeyPath:NSStringFromSelector(@selector(toUser))
+                                                                  value:value compareOptions:compareOptions];
+}
+
++ (NSPredicate *)relevantMessageRemotePartyJIDPredicateWithValue:(XMPPJID *)value compareOptions:(XMPPJIDCompareOptions)compareOptions
+{
+    NSPredicate *outgoingMessagePredicate =
+    [NSCompoundPredicate andPredicateWithSubpredicates:@[[self relevantMessageToJIDPredicateWithValue:value compareOptions:compareOptions],
+                                                         [XMPPMessageContextItem messageDirectionPredicateWithValue:XMPPMessageDirectionOutgoing]]];
+    NSPredicate *incomingMessagePredicate =
+    [NSCompoundPredicate andPredicateWithSubpredicates:@[[self relevantMessageFromJIDPredicateWithValue:value compareOptions:compareOptions],
+                                                         [XMPPMessageContextItem messageDirectionPredicateWithValue:XMPPMessageDirectionIncoming]]];
+    
+    return [NSCompoundPredicate orPredicateWithSubpredicates:@[outgoingMessagePredicate, incomingMessagePredicate]];
+}
+
++ (NSPredicate *)contextTimestampRangePredicateWithStartValue:(nullable NSDate *)startValue endValue:(nullable NSDate *)endValue
+{
+    return [XMPPMessageContextTimestampItem timestampRangePredicateWithStartValue:startValue endValue:endValue];
+}
+
+- (XMPPMessage *)baseMessage
 {
     NSString *typeString;
     switch (self.type) {
@@ -285,26 +363,45 @@
         [message addThread:self.thread];
     }
     
-    [self.parentContextNode applyContextToOutgoingMessage:message fromNode:self];
-    for (XMPPMessageContextNode *childContextNode in self.childContextNodes) {
-        [childContextNode applyContextToOutgoingMessage:message fromNode:self];
-    }
-    
     return message;
 }
 
-- (void)registerOutgoingMessageInStreamWithJID:(XMPPJID *)streamJID streamEventID:(NSString *)streamEventID
+- (void)registerLocalOriginMessageWithStreamEventID:(NSString *)streamEventID
 {
-    NSAssert(self.managedObjectContext, @"Attempted to register an outgoing message event for a message node not associated with any managed object context");
+    XMPPMessageContextNode *localOriginContextNode = [self appendContextNodeWithStreamEventID:streamEventID];
+    [localOriginContextNode appendMarkerItemWithTag:XMPPMessageContextLocalOriginTag];
+}
+
+- (void)registerSentMessageWithStreamJID:(XMPPJID *)streamJID timestamp:(NSDate *)timestamp
+{
+    NSAssert(self.direction == XMPPMessageDirectionOutgoing, @"Sent message registration is only applicable to outgoing message nodes");
     
-    [self obsoleteOutgoingStreamEvents];
+    XMPPMessageContextNode *previousLocalOriginNode = [self lookupCurrentLocalOriginNodeWithBlock:^XMPPMessageContextNode *(XMPPMessageContextNode *contextNode) {
+        return [contextNode jidItemValueForTag:XMPPMessageContextStreamJIDTag] ? contextNode : nil;
+    }];
+    [previousLocalOriginNode obsolete];
     
-    XMPPMessageStreamEventNode *streamEventNode = [XMPPMessageStreamEventNode xmpp_insertNewObjectInManagedObjectContext:self.managedObjectContext];
-    streamEventNode.eventID = streamEventID;
-    streamEventNode.kind = XMPPMessageStreamEventKindOutgoing;
-    streamEventNode.streamJID = streamJID;
+    XMPPMessageContextNode *pendingLocalOriginNode = [self lookupCurrentLocalOriginNodeWithBlock:^XMPPMessageContextNode *(XMPPMessageContextNode *contextNode) {
+        return contextNode;
+    }];
+    NSAssert(pendingLocalOriginNode, @"No pending local origin context node found");
     
-    [self addChildContextNodesObject:streamEventNode];
+    [pendingLocalOriginNode appendJIDItemWithTag:XMPPMessageContextStreamJIDTag value:streamJID];
+    [pendingLocalOriginNode appendTimestampItemWithTag:XMPPMessageContextStreamTimestampTag value:timestamp];
+}
+
+- (XMPPJID *)streamJID
+{
+    return [self lookupInCurrentContextWithBlock:^id _Nonnull(XMPPMessageContextNode * _Nonnull contextNode) {
+        return [contextNode jidItemValueForTag:XMPPMessageContextStreamJIDTag];
+    }];
+}
+
+- (NSDate *)timestamp
+{
+    return [self lookupInCurrentContextWithBlock:^id _Nonnull(XMPPMessageContextNode * _Nonnull contextNode) {
+        return [contextNode timestampItemValueForTag:XMPPMessageContextStreamTimestampTag];
+    }];
 }
 
 #pragma mark - Overridden
@@ -315,6 +412,15 @@
     
     [self setPrimitiveFromJID:nil];
     [self setPrimitiveToJID:nil];
+}
+
+#pragma mark - Private
+
+- (XMPPMessageContextNode *)lookupCurrentLocalOriginNodeWithBlock:(XMPPMessageContextNode *(^)(XMPPMessageContextNode *contextNode))lookupBlock
+{
+    return [self lookupInCurrentContextWithBlock:^id _Nonnull(XMPPMessageContextNode * _Nonnull contextNode) {
+        return [contextNode hasMarkerItemForTag:XMPPMessageContextLocalOriginTag] ? lookupBlock(contextNode) : nil;
+    }];
 }
 
 @end

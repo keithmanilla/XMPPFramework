@@ -1,8 +1,10 @@
 #import <CoreData/CoreData.h>
+#import "XMPPJID.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
 @class XMPPJID, XMPPMessage;
+@protocol XMPPMessageContextFetchRequestResult;
 
 typedef NS_ENUM(int16_t, XMPPMessageDirection) {
     XMPPMessageDirectionUnspecified,
@@ -32,17 +34,36 @@ typedef NS_ENUM(int16_t, XMPPMessageType) {
 @property (nonatomic, assign) XMPPMessageType type;
 
 + (XMPPMessageBaseNode *)findOrCreateForIncomingMessage:(XMPPMessage *)message
-                                          withStreamJID:(XMPPJID *)streamJID
-                                          streamEventID:(NSString *)streamEventID
+                                      withStreamEventID:(NSString *)streamEventID
+                                              streamJID:(XMPPJID *)streamJID
+                                              timestamp:(NSDate *)timestamp
                                  inManagedObjectContext:(NSManagedObjectContext *)managedObjectContext;
-+ (XMPPMessageBaseNode *)insertForOutgoingMessageToRecipientWithJID:(XMPPJID *)toJID
-                                             inManagedObjectContext:(NSManagedObjectContext *)managedObjectContext;
++ (instancetype)insertForOutgoingMessageInManagedObjectContext:(NSManagedObjectContext *)managedObjectContext;
++ (nullable XMPPMessageBaseNode *)findForLocalOriginMessageWithStreamEventID:(NSString *)streamEventID
+                                                      inManagedObjectContext:(NSManagedObjectContext *)managedObjectContext;
 
-- (XMPPMessage *)outgoingMessage;
-- (void)registerOutgoingMessageInStreamWithJID:(XMPPJID *)streamJID streamEventID:(NSString *)streamEventID;
++ (NSFetchedResultsController<XMPPMessageContextFetchRequestResult> *)fetchTimestampContextWithPredicate:(NSPredicate *)predicate
+                                                                                        inAscendingOrder:(BOOL)isInAscendingOrder
+                                                                                fromManagedObjectContext:(NSManagedObjectContext *)managedObjectContext;
++ (NSPredicate *)streamTimestampContextPredicate;
++ (NSPredicate *)relevantMessageFromJIDPredicateWithValue:(XMPPJID *)value compareOptions:(XMPPJIDCompareOptions)compareOptions;
++ (NSPredicate *)relevantMessageToJIDPredicateWithValue:(XMPPJID *)value compareOptions:(XMPPJIDCompareOptions)compareOptions;
++ (NSPredicate *)relevantMessageRemotePartyJIDPredicateWithValue:(XMPPJID *)value compareOptions:(XMPPJIDCompareOptions)compareOptions;
++ (NSPredicate *)contextTimestampRangePredicateWithStartValue:(nullable NSDate *)startValue endValue:(nullable NSDate *)endValue;
 
+- (XMPPMessage *)baseMessage;
 
+- (void)registerLocalOriginMessageWithStreamEventID:(NSString *)streamEventID;
+- (void)registerSentMessageWithStreamJID:(XMPPJID *)streamJID timestamp:(NSDate *)timestamp;
 
+- (nullable XMPPJID *)streamJID;
+- (nullable NSDate *)timestamp;
+
+@end
+
+@protocol XMPPMessageContextFetchRequestResult <NSFetchRequestResult>
+
+@property (nonatomic, strong, readonly) XMPPMessageBaseNode *relevantMessageNode;
 
 @end
 
