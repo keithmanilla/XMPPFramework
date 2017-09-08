@@ -163,6 +163,7 @@
 #import "XMPPMessageBaseNode.h"
 #import "XMPPMessageBaseNode+Protected.h"
 #import "XMPPMessageBaseNode+ContextHelpers.h"
+#import "XMPPMessageBaseNode+ContextObsoletion.h"
 #import "XMPPMessageContextNode.h"
 #import "XMPPMessageContextItem.h"
 
